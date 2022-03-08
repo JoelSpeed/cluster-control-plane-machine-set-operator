@@ -67,6 +67,7 @@ func newListFromObject(k8sClient client.Client, obj client.Object) client.Object
 
 	listObj, ok := newObj.(client.ObjectList)
 	Expect(ok).To(BeTrue())
+
 	return listObj
 }
 
@@ -85,13 +86,13 @@ func removeNamespace(ctx context.Context, cfg *rest.Config, k8sClient client.Cli
 	// Remove the finalizer
 	Eventually(func() error {
 		if err := komega.Get(ns)(); err != nil {
-			return err
+			return fmt.Errorf("could not get namespace: %w", err)
 		}
 		ns.Spec.Finalizers = []corev1.FinalizerName{}
 
 		_, err := coreClient.Namespaces().Finalize(ctx, ns, metav1.UpdateOptions{})
 		if err != nil {
-			return err
+			return fmt.Errorf("could not finalize namespace: %w", err)
 		}
 
 		return nil

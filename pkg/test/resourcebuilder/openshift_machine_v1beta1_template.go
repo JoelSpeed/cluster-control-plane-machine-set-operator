@@ -73,6 +73,7 @@ func (m OpenShiftMachineV1Beta1TemplateBuilder) WithLabel(key, value string) Ope
 	}
 
 	m.labels[key] = value
+
 	return m
 }
 

@@ -63,11 +63,13 @@ func (a AWSFailureDomainsBuilder) BuildFailureDomains() machinev1.FailureDomains
 	return fds
 }
 
+// WithFailureDomainBuilder adds a failure domain builder to the failure domains builder's builders.
 func (a AWSFailureDomainsBuilder) WithFailureDomainBuilder(fdBuilder AWSFailureDomainBuilder) AWSFailureDomainsBuilder {
 	a.failureDomainsBuilders = append(a.failureDomainsBuilders, fdBuilder)
 	return a
 }
 
+// WithFailureDomainBuilders replaces the failure domains builder's builders with the given builders.
 func (a AWSFailureDomainsBuilder) WithFailureDomainBuilders(fdBuilders ...AWSFailureDomainBuilder) AWSFailureDomainsBuilder {
 	a.failureDomainsBuilders = fdBuilders
 	return a

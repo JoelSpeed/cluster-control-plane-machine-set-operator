@@ -78,13 +78,14 @@ func (m MachineBuilder) WithGenerateName(generateName string) MachineBuilder {
 	return m
 }
 
-// WithLabels sets the labels for the machine builder.
+// WithLabel sets the labels for the machine builder.
 func (m MachineBuilder) WithLabel(key, value string) MachineBuilder {
 	if m.labels == nil {
 		m.labels = make(map[string]string)
 	}
 
 	m.labels[key] = value
+
 	return m
 }
 

@@ -21,7 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// NameSpace creates a new namespace builder.
+// Namespace creates a new namespace builder.
 func Namespace() NamespaceBuilder {
 	return NamespaceBuilder{}
 }
