@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 
 	"github.com/go-logr/logr"
 	machinev1 "github.com/openshift/api/machine/v1"
@@ -137,6 +139,85 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineUpdates(ctx context.C
 // In certain scenarios, there may be indexes with missing Machines. In these circumstances, the update should attempt
 // to create a new Machine to fulfil the requirement of that index.
 func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx context.Context, logger logr.Logger, cpms *machinev1.ControlPlaneMachineSet, machineProvider machineproviders.MachineProvider, indexedMachineInfos map[int32][]machineproviders.MachineInfo) (ctrl.Result, error) {
+	logger = logger.WithValues("updateStrategy", cpms.Spec.Strategy.Type)
+
+	// To ensure an ordered and safe reconciliation,
+	// one index at a time is considered.
+	// Indexes are sorted in ascendent order, so that all the operations of the same importance,
+	// are executed prioritizing the lower indexes first.
+	sortedIndexedMs := sortMachineInfos(indexedMachineInfos)
+
+	// The maximum number of machines that
+	// can be scheduled above the original number of desired machines.
+	// At present, the surge is limited to a single Machine instance.
+	maxSurge := 1
+	// Devise the existing surge and keep track of the current surge count.
+	surgeCount := deviseExistingSurge(cpms, sortedIndexedMs)
+
+	// Reconcile any index with no Machine first.
+	for idx, machines := range sortedIndexedMs {
+		if empty(machines) {
+			// There are No Machines for this index.
+			// Create a new Machine for it.
+			logger = logger.WithValues("index", idx, "namespace", r.Namespace, "name", "<Unknown>")
+			return createMachine(ctx, logger, machineProvider, idx, maxSurge, &surgeCount)
+		}
+	}
+
+	// Reconcile any index with no Ready Machines but a replacement pending.
+	for idx, machines := range sortedIndexedMs {
+		if empty(readyMachines(machines)) && any(pendingMachines(machines)) {
+			// There are No Ready Machines for this index but a Pending Machine Replacement is present.
+			// Wait for it to become Ready.
+			logger = logger.WithValues("index", idx, "namespace", r.Namespace, "name", getMachineReplacementName(idx))
+			logger.V(2).Info(waitingForReady)
+			return ctrl.Result{}, nil
+		}
+	}
+
+	// Reconcile machines that need an update.
+	for idx, machines := range sortedIndexedMs {
+		// Find out if and what Machines in this index need an update.
+		outdatedMs := needUpdateMachines(machines)
+		if any(outdatedMs) {
+			// Some Machines need an update for this index.
+			// For this reconciliation, just consider the first Machine that needs update for this index.
+			outdatedMachine := outdatedMs[0]
+			logger = logger.WithValues("index", idx, "namespace", r.Namespace, "name", getMachineName(idx))
+
+			// Check if an Updated (Spec up-to-date and Ready) Machine replacement already exists for this index.
+			if any(updatedMachines(machines)) {
+				// A replacement exists.
+				if !isDeletedMachine(outdatedMachine) {
+					// The Outdated Machine is still around.
+					// Now that an Updated replacement exists for it,
+					// it's safe to trigger its Deletion.
+					return deleteMachine(ctx, logger, machineProvider, outdatedMachine, r.Namespace, idx)
+				}
+
+				// The Outdated Machine has already been marked for deletion.
+				// Wait for its removal.
+				logger.V(2).Info(waitingForRemoved)
+				return ctrl.Result{}, nil
+			}
+
+			// Check if a Pending (Spec up-to-date but Non Ready) Replacement is present for the index.
+			if any(pendingMachines(machines)) {
+				// A Pending Machine Replacement is present.
+				// Wait for it to become Ready.
+				logger.V(2).WithValues("replacementName", getMachineReplacementName(idx)).Info(waitingForReplacement)
+				return ctrl.Result{}, nil
+			}
+
+			// No Healthy or Pending Replacement Machine exists,
+			// trigger a Machine creation.
+			return createMachine(ctx, logger, machineProvider, idx, maxSurge, &surgeCount)
+		}
+	}
+
+	// If here it means no updates were required.
+	logger.V(4).Info(noUpdatesRequired)
+
 	return ctrl.Result{}, nil
 }
 
@@ -150,5 +231,136 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 // In certain scenarios, there may be indexes with missing Machines. In these circumstances, the update should attempt
 // to create a new Machine to fulfil the requirement of that index.
 func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx context.Context, logger logr.Logger, cpms *machinev1.ControlPlaneMachineSet, machineProvider machineproviders.MachineProvider, indexedMachineInfos map[int32][]machineproviders.MachineInfo) (ctrl.Result, error) {
+	return ctrl.Result{}, nil
+}
+
+// isDeletedMachine checks if a machine is deleted.
+func isDeletedMachine(m machineproviders.MachineInfo) bool {
+	return m.MachineRef.ObjectMeta.DeletionTimestamp != nil
+}
+
+// needUpdateMachines returns the list of MachineInfo which have Machines that need an update.
+func needUpdateMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	needUpdate := []machineproviders.MachineInfo{}
+
+	for _, m := range machinesInfo {
+		if m.NeedsUpdate {
+			needUpdate = append(needUpdate, m)
+		}
+	}
+
+	return needUpdate
+}
+
+// pendingMachines returns the list of MachineInfo which have a Pending Machine.
+func pendingMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	result := []machineproviders.MachineInfo{}
+	for i := range machinesInfo {
+		if !machinesInfo[i].Ready && !machinesInfo[i].NeedsUpdate {
+			result = append(result, machinesInfo[i])
+		}
+	}
+	return result
+}
+
+// updatedMachines returns the list of MachineInfo which have an Updated (Spec up-to-date and Ready) Machine.
+func updatedMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	result := []machineproviders.MachineInfo{}
+	for i := range machinesInfo {
+		if machinesInfo[i].Ready && !machinesInfo[i].NeedsUpdate {
+			result = append(result, machinesInfo[i])
+		}
+	}
+	return result
+}
+
+// readyMachines returns the list of MachineInfo which have a Ready Machine.
+func readyMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	result := []machineproviders.MachineInfo{}
+	for i := range machinesInfo {
+		if machinesInfo[i].Ready {
+			result = append(result, machinesInfo[i])
+		}
+	}
+	return result
+}
+
+// getMachineName returns the canonical name for a machine of a certain index.
+func getMachineName(idx int) string {
+	return "machine-" + strconv.Itoa(idx)
+}
+
+// getMachineReplacementName returns the canonical name for a replacement machine of a certain index.
+func getMachineReplacementName(idx int) string {
+	return "machine-replacement-" + strconv.Itoa(idx)
+}
+
+// sortMachineInfos returns a sorted list of indexes together with their MachineInfos.
+func sortMachineInfos(indexedMachineInfos map[int32][]machineproviders.MachineInfo) [][]machineproviders.MachineInfo {
+	slice := [][]machineproviders.MachineInfo{}
+
+	keys := make([]int, 0, len(indexedMachineInfos))
+	for k := range indexedMachineInfos {
+		keys = append(keys, int(k))
+	}
+
+	sort.Ints(keys)
+
+	for i := range keys {
+		slice = append(slice, indexedMachineInfos[int32(i)])
+	}
+	return slice
+}
+
+// deviseExistingSurge computes the current amount of replicas surge for the ControlPlaneMachineSet.
+func deviseExistingSurge(cpms *machinev1.ControlPlaneMachineSet, mis [][]machineproviders.MachineInfo) int {
+	desiredReplicas := int(*cpms.Spec.Replicas)
+	currentReplicas := 0
+
+	for _, mi := range mis {
+		currentReplicas += len(mi)
+	}
+
+	return currentReplicas - desiredReplicas
+}
+
+// any checks if a MachineInfo slice contains at least 1 element.
+func any(machinesInfo []machineproviders.MachineInfo) bool {
+	return len(machinesInfo) > 0
+}
+
+// any checks if a MachineInfo slice is empty.
+func empty(machinesInfo []machineproviders.MachineInfo) bool {
+	return len(machinesInfo) == 0
+}
+
+// deleteMachine deletes the Machine provided.
+func deleteMachine(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, outdatedMachine machineproviders.MachineInfo, namespace string, idx int) (ctrl.Result, error) {
+	if err := machineProvider.DeleteMachine(ctx, logger, outdatedMachine.MachineRef); err != nil {
+		werr := fmt.Errorf("error deleting Machine %s/%s: %w", namespace, getMachineName(idx), err)
+		logger.Error(werr, errorDeletingMachine)
+		return ctrl.Result{}, werr
+	}
+
+	logger.V(2).Info(removingOldMachine)
+	return ctrl.Result{}, nil
+}
+
+// createMachine creates the Machine provided.
+func createMachine(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, idx int, maxSurge int, surgeCount *int) (ctrl.Result, error) {
+	// Check if a surge in Machines is allowed.
+	if *surgeCount < maxSurge {
+		// There is still room to surge,
+		// trigger a Replacement Machine creation.
+		if err := machineProvider.CreateMachine(ctx, logger, int32(idx)); err != nil {
+			werr := fmt.Errorf("error creating new Machine for index %d: %w", idx, err)
+			logger.Error(werr, errorCreatingMachine)
+			return ctrl.Result{}, werr
+		}
+
+		logger.V(2).Info(createdReplacement)
+		*surgeCount++
+	}
+
 	return ctrl.Result{}, nil
 }
