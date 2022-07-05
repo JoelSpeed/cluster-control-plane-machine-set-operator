@@ -169,7 +169,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 	for idx, machines := range sortedIndexedMs {
 		// Find out if and what Machines in this index need an update.
 		machinesPending := pendingMachines(machines)
-		if empty(readyMachines(machines)) && any(machinesPending) {
+		if empty(readyMachines(machines)) && hasAny(machinesPending) {
 			// There are No Ready Machines for this index but a Pending Machine Replacement is present.
 			// Wait for it to become Ready.
 			// Consider the first found pending machine for this index to be the replacement machine.
@@ -184,14 +184,14 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 	for idx, machines := range sortedIndexedMs {
 		// Find out if and what Machines in this index need an update.
 		outdatedMs := needUpdateMachines(machines)
-		if any(outdatedMs) {
+		if hasAny(outdatedMs) {
 			// Some Machines need an update for this index.
 			// For this reconciliation, just consider the first Machine that needs update for this index.
 			outdatedMachine := outdatedMs[0]
 			logger = logger.WithValues("index", idx, "namespace", r.Namespace, "name", outdatedMachine.MachineRef.ObjectMeta.Name)
 
 			// Check if an Updated (Spec up-to-date and Ready) Machine replacement already exists for this index.
-			if any(updatedMachines(machines)) {
+			if hasAny(updatedMachines(machines)) {
 				// A replacement exists.
 				if !isDeletedMachine(outdatedMachine) {
 					// The Outdated Machine is still around.
@@ -208,7 +208,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 
 			// Check if a Pending (Spec up-to-date but Non Ready) Replacement is present for the index.
 			machinesPending := pendingMachines(machines)
-			if any(machinesPending) {
+			if hasAny(machinesPending) {
 				// A Pending Machine Replacement is present.
 				// Wait for it to become Ready.
 				// Consider the first found pending machine for this index to be the replacement machine.
@@ -322,8 +322,8 @@ func deviseExistingSurge(cpms *machinev1.ControlPlaneMachineSet, mis [][]machine
 	return currentReplicas - desiredReplicas
 }
 
-// any checks if a MachineInfo slice contains at least 1 element.
-func any(machinesInfo []machineproviders.MachineInfo) bool {
+// hasAny checks if a MachineInfo slice contains at least 1 element.
+func hasAny(machinesInfo []machineproviders.MachineInfo) bool {
 	return len(machinesInfo) > 0
 }
 
