@@ -295,7 +295,7 @@ func getMachineReplacementName(idx int) string {
 	return "machine-replacement-" + strconv.Itoa(idx)
 }
 
-// sortMachineInfos returns a sorted list of indexes together with their MachineInfos.
+// sortMachineInfos returns a list numerically sorted by index, of each index' MachineInfos.
 func sortMachineInfos(indexedMachineInfos map[int32][]machineproviders.MachineInfo) [][]machineproviders.MachineInfo {
 	slice := [][]machineproviders.MachineInfo{}
 
