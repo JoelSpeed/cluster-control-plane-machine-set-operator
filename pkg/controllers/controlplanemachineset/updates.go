@@ -157,7 +157,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 
 	// Reconcile any index with no Machine first.
 	for idx, machines := range sortedIndexedMs {
-		if empty(machines) {
+		if isEmpty(machines) {
 			// There are No Machines for this index.
 			// Create a new Machine for it.
 			logger = logger.WithValues("index", idx, "namespace", r.Namespace, "name", "<Unknown>")
@@ -169,7 +169,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 	for idx, machines := range sortedIndexedMs {
 		// Find out if and what Machines in this index need an update.
 		machinesPending := pendingMachines(machines)
-		if empty(readyMachines(machines)) && hasAny(machinesPending) {
+		if isEmpty(readyMachines(machines)) && hasAny(machinesPending) {
 			// There are No Ready Machines for this index but a Pending Machine Replacement is present.
 			// Wait for it to become Ready.
 			// Consider the first found pending machine for this index to be the replacement machine.
@@ -327,8 +327,8 @@ func hasAny(machinesInfo []machineproviders.MachineInfo) bool {
 	return len(machinesInfo) > 0
 }
 
-// any checks if a MachineInfo slice is empty.
-func empty(machinesInfo []machineproviders.MachineInfo) bool {
+// isEmpty checks if a MachineInfo slice is empty.
+func isEmpty(machinesInfo []machineproviders.MachineInfo) bool {
 	return len(machinesInfo) == 0
 }
 
