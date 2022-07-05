@@ -176,6 +176,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 			replacementMachine := machinesPending[0]
 			logger = logger.WithValues("index", idx, "namespace", r.Namespace, "name", replacementMachine.MachineRef.ObjectMeta.Name)
 			logger.V(2).Info(waitingForReady)
+
 			return ctrl.Result{}, nil
 		}
 	}
@@ -197,12 +198,13 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 					// The Outdated Machine is still around.
 					// Now that an Updated replacement exists for it,
 					// it's safe to trigger its Deletion.
-					return deleteMachine(ctx, logger, machineProvider, outdatedMachine, r.Namespace, idx)
+					return deleteMachine(ctx, logger, machineProvider, outdatedMachine, r.Namespace)
 				}
 
 				// The Outdated Machine has already been marked for deletion.
 				// Wait for its removal.
 				logger.V(2).Info(waitingForRemoved)
+
 				return ctrl.Result{}, nil
 			}
 
@@ -214,6 +216,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 				// Consider the first found pending machine for this index to be the replacement machine.
 				replacementMachine := machinesPending[0]
 				logger.V(2).WithValues("replacementName", replacementMachine.MachineRef.ObjectMeta.Name).Info(waitingForReplacement)
+
 				return ctrl.Result{}, nil
 			}
 
@@ -263,33 +266,39 @@ func needUpdateMachines(machinesInfo []machineproviders.MachineInfo) []machinepr
 // pendingMachines returns the list of MachineInfo which have a Pending Machine.
 func pendingMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
 	result := []machineproviders.MachineInfo{}
+
 	for i := range machinesInfo {
 		if !machinesInfo[i].Ready && !machinesInfo[i].NeedsUpdate {
 			result = append(result, machinesInfo[i])
 		}
 	}
+
 	return result
 }
 
 // updatedMachines returns the list of MachineInfo which have an Updated (Spec up-to-date and Ready) Machine.
 func updatedMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
 	result := []machineproviders.MachineInfo{}
+
 	for i := range machinesInfo {
 		if machinesInfo[i].Ready && !machinesInfo[i].NeedsUpdate {
 			result = append(result, machinesInfo[i])
 		}
 	}
+
 	return result
 }
 
 // readyMachines returns the list of MachineInfo which have a Ready Machine.
 func readyMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
 	result := []machineproviders.MachineInfo{}
+
 	for i := range machinesInfo {
 		if machinesInfo[i].Ready {
 			result = append(result, machinesInfo[i])
 		}
 	}
+
 	return result
 }
 
@@ -307,6 +316,7 @@ func sortMachineInfos(indexedMachineInfos map[int32][]machineproviders.MachineIn
 	for i := range keys {
 		slice = append(slice, indexedMachineInfos[int32(i)])
 	}
+
 	return slice
 }
 
@@ -333,14 +343,16 @@ func isEmpty(machinesInfo []machineproviders.MachineInfo) bool {
 }
 
 // deleteMachine deletes the Machine provided.
-func deleteMachine(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, outdatedMachine machineproviders.MachineInfo, namespace string, idx int) (ctrl.Result, error) {
+func deleteMachine(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, outdatedMachine machineproviders.MachineInfo, namespace string) (ctrl.Result, error) {
 	if err := machineProvider.DeleteMachine(ctx, logger, outdatedMachine.MachineRef); err != nil {
 		werr := fmt.Errorf("error deleting Machine %s/%s: %w", namespace, outdatedMachine.MachineRef.ObjectMeta.Name, err)
 		logger.Error(werr, errorDeletingMachine)
+
 		return ctrl.Result{}, werr
 	}
 
 	logger.V(2).Info(removingOldMachine)
+
 	return ctrl.Result{}, nil
 }
 
@@ -353,6 +365,7 @@ func createMachine(ctx context.Context, logger logr.Logger, machineProvider mach
 		if err := machineProvider.CreateMachine(ctx, logger, int32(idx)); err != nil {
 			werr := fmt.Errorf("error creating new Machine for index %d: %w", idx, err)
 			logger.Error(werr, errorCreatingMachine)
+
 			return ctrl.Result{}, werr
 		}
 
