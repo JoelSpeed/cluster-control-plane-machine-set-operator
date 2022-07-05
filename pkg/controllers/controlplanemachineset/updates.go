@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 
 	"github.com/go-logr/logr"
 	machinev1 "github.com/openshift/api/machine/v1"
@@ -168,10 +167,14 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 
 	// Reconcile any index with no Ready Machines but a replacement pending.
 	for idx, machines := range sortedIndexedMs {
-		if empty(readyMachines(machines)) && any(pendingMachines(machines)) {
+		// Find out if and what Machines in this index need an update.
+		machinesPending := pendingMachines(machines)
+		if empty(readyMachines(machines)) && any(machinesPending) {
 			// There are No Ready Machines for this index but a Pending Machine Replacement is present.
 			// Wait for it to become Ready.
-			logger = logger.WithValues("index", idx, "namespace", r.Namespace, "name", getMachineReplacementName(idx))
+			// Consider the first found pending machine for this index to be the replacement machine.
+			replacementMachine := machinesPending[0]
+			logger = logger.WithValues("index", idx, "namespace", r.Namespace, "name", replacementMachine.MachineRef.ObjectMeta.Name)
 			logger.V(2).Info(waitingForReady)
 			return ctrl.Result{}, nil
 		}
@@ -185,7 +188,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 			// Some Machines need an update for this index.
 			// For this reconciliation, just consider the first Machine that needs update for this index.
 			outdatedMachine := outdatedMs[0]
-			logger = logger.WithValues("index", idx, "namespace", r.Namespace, "name", getMachineName(idx))
+			logger = logger.WithValues("index", idx, "namespace", r.Namespace, "name", outdatedMachine.MachineRef.ObjectMeta.Name)
 
 			// Check if an Updated (Spec up-to-date and Ready) Machine replacement already exists for this index.
 			if any(updatedMachines(machines)) {
@@ -204,10 +207,13 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 			}
 
 			// Check if a Pending (Spec up-to-date but Non Ready) Replacement is present for the index.
-			if any(pendingMachines(machines)) {
+			machinesPending := pendingMachines(machines)
+			if any(machinesPending) {
 				// A Pending Machine Replacement is present.
 				// Wait for it to become Ready.
-				logger.V(2).WithValues("replacementName", getMachineReplacementName(idx)).Info(waitingForReplacement)
+				// Consider the first found pending machine for this index to be the replacement machine.
+				replacementMachine := machinesPending[0]
+				logger.V(2).WithValues("replacementName", replacementMachine.MachineRef.ObjectMeta.Name).Info(waitingForReplacement)
 				return ctrl.Result{}, nil
 			}
 
@@ -287,16 +293,6 @@ func readyMachines(machinesInfo []machineproviders.MachineInfo) []machineprovide
 	return result
 }
 
-// getMachineName returns the canonical name for a machine of a certain index.
-func getMachineName(idx int) string {
-	return "machine-" + strconv.Itoa(idx)
-}
-
-// getMachineReplacementName returns the canonical name for a replacement machine of a certain index.
-func getMachineReplacementName(idx int) string {
-	return "machine-replacement-" + strconv.Itoa(idx)
-}
-
 // sortMachineInfos returns a list numerically sorted by index, of each index' MachineInfos.
 func sortMachineInfos(indexedMachineInfos map[int32][]machineproviders.MachineInfo) [][]machineproviders.MachineInfo {
 	slice := [][]machineproviders.MachineInfo{}
@@ -339,7 +335,7 @@ func empty(machinesInfo []machineproviders.MachineInfo) bool {
 // deleteMachine deletes the Machine provided.
 func deleteMachine(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, outdatedMachine machineproviders.MachineInfo, namespace string, idx int) (ctrl.Result, error) {
 	if err := machineProvider.DeleteMachine(ctx, logger, outdatedMachine.MachineRef); err != nil {
-		werr := fmt.Errorf("error deleting Machine %s/%s: %w", namespace, getMachineName(idx), err)
+		werr := fmt.Errorf("error deleting Machine %s/%s: %w", namespace, outdatedMachine.MachineRef.ObjectMeta.Name, err)
 		logger.Error(werr, errorDeletingMachine)
 		return ctrl.Result{}, werr
 	}
