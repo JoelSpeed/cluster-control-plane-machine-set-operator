@@ -152,6 +152,8 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 	// At present, the surge is limited to a single Machine instance.
 	maxSurge := 1
 	// Devise the existing surge and keep track of the current surge count.
+	// No check for early stoppage is done here,
+	// as deletions can continue even if the maxSurge has been already reached.
 	surgeCount := deviseExistingSurge(cpms, sortedIndexedMs)
 
 	// Reconcile any index with no Machine first.
