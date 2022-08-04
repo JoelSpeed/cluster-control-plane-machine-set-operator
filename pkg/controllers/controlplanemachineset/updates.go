@@ -263,7 +263,7 @@ func (r *ControlPlaneMachineSetReconciler) deleteReplacedMachines(ctx context.Co
 	if toDeleteMachine.MachineRef != nil {
 		logger := logger.WithValues("index", int(toDeleteMachine.Index), "namespace", r.Namespace, "name", toDeleteMachine.MachineRef.ObjectMeta.Name)
 
-		if !isDeletedMachine(toDeleteMachine) {
+		if !isDeleted(toDeleteMachine) {
 			result, err := deleteMachine(ctx, logger, machineProvider, toDeleteMachine, r.Namespace)
 			if err != nil {
 				return false, result, err
@@ -358,90 +358,111 @@ func createMachine(ctx context.Context, logger logr.Logger, machineProvider mach
 	return ctrl.Result{}, nil
 }
 
+// filterMachineInfos returns all machineInfos matched by the filter provided.
+func filterMachineInfos(machineInfos []machineproviders.MachineInfo, filter func(machineproviders.MachineInfo) bool) []machineproviders.MachineInfo {
+	out := []machineproviders.MachineInfo{}
+
+	for _, machineInfo := range machineInfos {
+		if filter(machineInfo) {
+			out = append(out, machineInfo)
+		}
+	}
+
+	return out
+}
+
+// and runs a logical AND on the provided filters.
+func and(filters ...func(machineproviders.MachineInfo) bool) func(machineproviders.MachineInfo) bool {
+	return func(machineInfo machineproviders.MachineInfo) bool {
+		for _, filter := range filters {
+			if !filter(machineInfo) {
+				return false
+			}
+		}
+
+		// All filters matched
+		return true
+	}
+}
+
+// or runs a logical OR on the provided filters.
+func or(filters ...func(machineproviders.MachineInfo) bool) func(machineproviders.MachineInfo) bool {
+	return func(machineInfo machineproviders.MachineInfo) bool {
+		for _, filter := range filters {
+			if filter(machineInfo) {
+				return true
+			}
+		}
+
+		// No filters matched
+		return false
+	}
+}
+
+// not negates a filter.
+func not(filter func(machineproviders.MachineInfo) bool) func(machineproviders.MachineInfo) bool {
+	return func(m machineproviders.MachineInfo) bool {
+		return !filter(m)
+	}
+}
+
 // isDeletedMachine checks if a machine is deleted.
-func isDeletedMachine(m machineproviders.MachineInfo) bool {
+func isDeleted(m machineproviders.MachineInfo) bool {
 	return m.MachineRef.ObjectMeta.DeletionTimestamp != nil
+}
+
+// needsUpdate checks if a machine is in need of an update.
+func needsUpdate(m machineproviders.MachineInfo) bool {
+	return m.NeedsUpdate
+}
+
+// isReady checks if a machine is ready.
+func isReady(m machineproviders.MachineInfo) bool {
+	return m.Ready
 }
 
 // needReplacementMachines returns the list of MachineInfo which have Machines that need an update or have
 // been deleted.
-func needReplacementMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
-	needUpdate := []machineproviders.MachineInfo{}
-
-	for _, m := range machinesInfo {
-		if m.NeedsUpdate || isDeletedMachine(m) {
-			needUpdate = append(needUpdate, m)
-		}
-	}
-
-	return needUpdate
+func needReplacementMachines(machineInfos []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	return filterMachineInfos(machineInfos, or(needsUpdate, isDeleted))
 }
 
 // pendingMachines returns the list of MachineInfo which have a Pending Machine and are not pending deletion.
 // A Machine pending deletion should not be considered pending as it will never progress into a Ready Machine.
-func pendingMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
-	result := []machineproviders.MachineInfo{}
-
-	for i := range machinesInfo {
-		if !machinesInfo[i].Ready && !machinesInfo[i].NeedsUpdate && !isDeletedMachine(machinesInfo[i]) {
-			result = append(result, machinesInfo[i])
-		}
-	}
-
-	return result
+func pendingMachines(machineInfos []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	return filterMachineInfos(machineInfos, and(
+		not(isReady),
+		not(needsUpdate),
+		not(isDeleted),
+	))
 }
 
 // updatedMachines returns the list of MachineInfo which have an Updated (Spec up-to-date and Ready) Machine.
-func updatedMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
-	result := []machineproviders.MachineInfo{}
-
-	for i := range machinesInfo {
-		if machinesInfo[i].Ready && !machinesInfo[i].NeedsUpdate {
-			result = append(result, machinesInfo[i])
-		}
-	}
-
-	return result
+func updatedMachines(machineInfos []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	return filterMachineInfos(machineInfos, and(
+		isReady,
+		not(needsUpdate),
+	))
 }
 
 // updatedMachines returns the list of MachineInfo which have an Updated (Spec up-to-date and Ready) Machine and
 // are not pending deletion.
-func updatedNonTerminatedMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
-	result := []machineproviders.MachineInfo{}
-
-	for i := range machinesInfo {
-		if machinesInfo[i].Ready && !machinesInfo[i].NeedsUpdate && !isDeletedMachine(machinesInfo[i]) {
-			result = append(result, machinesInfo[i])
-		}
-	}
-
-	return result
+func updatedNonTerminatedMachines(machineInfos []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	return filterMachineInfos(machineInfos, and(
+		isReady,
+		not(needsUpdate),
+		not(isDeleted),
+	))
 }
 
 // readyMachines returns the list of MachineInfo which have a Ready Machine.
-func readyMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
-	result := []machineproviders.MachineInfo{}
-
-	for i := range machinesInfo {
-		if machinesInfo[i].Ready {
-			result = append(result, machinesInfo[i])
-		}
-	}
-
-	return result
+func readyMachines(machineInfos []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	return filterMachineInfos(machineInfos, isReady)
 }
 
 // nonReadyMachines returns the list of MachineInfo which have a Non Ready Machine.
-func nonReadyMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
-	result := []machineproviders.MachineInfo{}
-
-	for i := range machinesInfo {
-		if !machinesInfo[i].Ready {
-			result = append(result, machinesInfo[i])
-		}
-	}
-
-	return result
+func nonReadyMachines(machineInfos []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	return filterMachineInfos(machineInfos, not(isReady))
 }
 
 // sortMachineInfosByIndex returns a list numerically sorted by index, of each index' MachineInfos.
