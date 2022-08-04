@@ -204,7 +204,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx co
 
 func (r *ControlPlaneMachineSetReconciler) waitForPendingMachines(logger logr.Logger, machines []machineproviders.MachineInfo) bool {
 	machinesPending := pendingMachines(machines)
-	machinesNeedingUpdate := needUpdateMachines(machines)
+	machinesNeedingUpdate := needReplacementMachines(machines)
 	machinesReady := readyMachines(machines)
 
 	// Find out if and what Machines in this index need an update.
@@ -237,7 +237,7 @@ func (r *ControlPlaneMachineSetReconciler) waitForPendingMachines(logger logr.Lo
 }
 
 func (r *ControlPlaneMachineSetReconciler) deleteReplacedMachines(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, machines []machineproviders.MachineInfo) (bool, ctrl.Result, error) {
-	machinesNeedingUpdate := needUpdateMachines(machines)
+	machinesNeedingUpdate := needReplacementMachines(machines)
 	machinesUpdated := updatedMachines(machines)
 	machinesOutdatedNonReady := nonReadyMachines(machinesNeedingUpdate)
 
@@ -283,9 +283,9 @@ func (r *ControlPlaneMachineSetReconciler) deleteReplacedMachines(ctx context.Co
 }
 
 func (r *ControlPlaneMachineSetReconciler) createReplacementMachines(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, machines []machineproviders.MachineInfo, idx int, maxSurge int, surgeCount *int) (bool, ctrl.Result, error) {
-	machinesNeedingUpdate := needUpdateMachines(machines)
+	machinesNeedingUpdate := needReplacementMachines(machines)
 	machinesPending := pendingMachines(machines)
-	machinesUpdated := updatedMachines(machines)
+	machinesUpdatedNonTerminated := updatedNonTerminatedMachines(machines)
 
 	if isEmpty(machines) {
 		// No Machines exist for this index.
@@ -300,9 +300,9 @@ func (r *ControlPlaneMachineSetReconciler) createReplacementMachines(ctx context
 		return true, result, nil
 	}
 
-	if hasAny(machinesNeedingUpdate) && isEmpty(machinesUpdated) && isEmpty(machinesPending) {
-		// A Machine for this index needs updating.
-		// No Updated or Pending (Updated, Non-Ready) Replacement Machine exist for it.
+	if hasAny(machinesNeedingUpdate) && isEmpty(machinesUpdatedNonTerminated) && isEmpty(machinesPending) {
+		// A Machine for this index needs updating (or has been deleted).
+		// No Updated (non-terminated) or Pending (Updated, Non-Ready) Replacement Machine exist for it.
 		// Trigger a Machine creation.
 		// Consider the first found outdated machine for this index to be the one in need of update.
 		outdatedMachine := machinesNeedingUpdate[0]
@@ -363,12 +363,13 @@ func isDeletedMachine(m machineproviders.MachineInfo) bool {
 	return m.MachineRef.ObjectMeta.DeletionTimestamp != nil
 }
 
-// needUpdateMachines returns the list of MachineInfo which have Machines that need an update.
-func needUpdateMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+// needReplacementMachines returns the list of MachineInfo which have Machines that need an update or have
+// been deleted.
+func needReplacementMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
 	needUpdate := []machineproviders.MachineInfo{}
 
 	for _, m := range machinesInfo {
-		if m.NeedsUpdate {
+		if m.NeedsUpdate || isDeletedMachine(m) {
 			needUpdate = append(needUpdate, m)
 		}
 	}
@@ -376,12 +377,13 @@ func needUpdateMachines(machinesInfo []machineproviders.MachineInfo) []machinepr
 	return needUpdate
 }
 
-// pendingMachines returns the list of MachineInfo which have a Pending Machine.
+// pendingMachines returns the list of MachineInfo which have a Pending Machine and are not pending deletion.
+// A Machine pending deletion should not be considered pending as it will never progress into a Ready Machine.
 func pendingMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
 	result := []machineproviders.MachineInfo{}
 
 	for i := range machinesInfo {
-		if !machinesInfo[i].Ready && !machinesInfo[i].NeedsUpdate {
+		if !machinesInfo[i].Ready && !machinesInfo[i].NeedsUpdate && !isDeletedMachine(machinesInfo[i]) {
 			result = append(result, machinesInfo[i])
 		}
 	}
@@ -395,6 +397,20 @@ func updatedMachines(machinesInfo []machineproviders.MachineInfo) []machineprovi
 
 	for i := range machinesInfo {
 		if machinesInfo[i].Ready && !machinesInfo[i].NeedsUpdate {
+			result = append(result, machinesInfo[i])
+		}
+	}
+
+	return result
+}
+
+// updatedMachines returns the list of MachineInfo which have an Updated (Spec up-to-date and Ready) Machine and
+// are not pending deletion.
+func updatedNonTerminatedMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	result := []machineproviders.MachineInfo{}
+
+	for i := range machinesInfo {
+		if machinesInfo[i].Ready && !machinesInfo[i].NeedsUpdate && !isDeletedMachine(machinesInfo[i]) {
 			result = append(result, machinesInfo[i])
 		}
 	}
