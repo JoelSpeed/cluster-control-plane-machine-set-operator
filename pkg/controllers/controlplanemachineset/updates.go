@@ -199,6 +199,29 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 // In certain scenarios, there may be indexes with missing Machines. In these circumstances, the update should attempt
 // to create a new Machine to fulfil the requirement of that index.
 func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx context.Context, logger logr.Logger, cpms *machinev1.ControlPlaneMachineSet, machineProvider machineproviders.MachineProvider, indexedMachineInfos map[int32][]machineproviders.MachineInfo) (ctrl.Result, error) {
+	logger = logger.WithValues("updateStrategy", cpms.Spec.Strategy.Type)
+
+	// To ensure an ordered and safe reconciliation,
+	// one index at a time is considered.
+	// Indexes are sorted in ascendent order, so that all the operations of the same importance,
+	// are executed prioritizing the lower indexes first.
+	sortedIndexedMs := sortMachineInfosByIndex(indexedMachineInfos)
+
+	updates := false
+
+	for _, machines := range sortedIndexedMs {
+		needsReplacement := needReplacementMachines(machines)
+		// if no machines have been deleted or need update in this info list, continue with checking
+		if len(needsReplacement) == 0 {
+			continue
+		}
+
+	}
+
+	if !updates {
+		logger.V(4).Info(noUpdatesRequired)
+	}
+
 	return ctrl.Result{}, nil
 }
 

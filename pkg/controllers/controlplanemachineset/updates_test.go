@@ -979,7 +979,7 @@ var _ = Describe("reconcileMachineUpdates", func() {
 
 	Context("When the update strategy is OnDelete", func() {
 		BeforeEach(func() {
-			cpmsBuilder = cpmsBuilder.WithStrategyType(machinev1.RollingUpdate)
+			cpmsBuilder = cpmsBuilder.WithStrategyType(machinev1.OnDelete)
 		})
 
 		type onDeleteUpdateTableInput struct {
@@ -1009,7 +1009,7 @@ var _ = Describe("reconcileMachineUpdates", func() {
 			Expect(logger.Entries()).To(ConsistOf(in.expectedLogsBuilder()))
 			Expect(cpms).To(Equal(originalCPMS), "The update functions should not modify the ControlPlaneMachineSet in any way")
 		},
-			PEntry("with no updates required", onDeleteUpdateTableInput{
+			Entry("with no updates required", onDeleteUpdateTableInput{
 				cpmsBuilder: cpmsBuilder.WithReplicas(3),
 				machineInfos: map[int32][]machineproviders.MachineInfo{
 					0: {updatedMachineBuilder.WithIndex(0).WithMachineName("machine-0").WithNodeName("node-0").Build()},
@@ -1091,7 +1091,7 @@ var _ = Describe("reconcileMachineUpdates", func() {
 					2: {updatedMachineBuilder.WithIndex(2).WithMachineName("machine-2").WithNodeName("node-2").Build()},
 				},
 				setupMock: func() {
-					mockMachineProvider.EXPECT().CreateMachine(gomock.Any(), gomock.Any(), int32(1)).Return(nil).Times(0)
+					mockMachineProvider.EXPECT().CreateMachine(gomock.Any(), gomock.Any(), int32(1)).Return(transientError).Times(0)
 					mockMachineProvider.EXPECT().DeleteMachine(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 				},
 				expectedLogsBuilder: func() []test.LogEntry {
