@@ -216,6 +216,13 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx co
 			continue
 		}
 
+		// if there is only 1 machine and it needs an update, log the need for the user to act
+		if len(needsReplacement) == 1 && needsReplacement[0].NeedsUpdate {
+			updates = true
+			logger = logger.WithValues("index", int(needsReplacement[0].Index), "namespace", r.Namespace, "name", needsReplacement[0].MachineRef.ObjectMeta.Name)
+			logger.V(2).Info(machineRequiresUpdate)
+			continue
+		}
 	}
 
 	if !updates {
