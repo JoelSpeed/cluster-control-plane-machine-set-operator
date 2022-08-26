@@ -207,25 +207,49 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx co
 	// are executed prioritizing the lower indexes first.
 	sortedIndexedMs := sortMachineInfosByIndex(indexedMachineInfos)
 
-	updates := false
+	// The maximum number of machines that
+	// can be scheduled above the original number of desired machines.
+	// At present, the surge is limited to a single Machine instance.
+	// NOTE: If this gets changed or parametrized,
+	// the tests will need to be updated accordingly.
+	maxSurge := 1
+	// Devise the existing surge and keep track of the current surge count.
+	// No check for early stoppage is done here,
+	// as deletions can continue even if the maxSurge has been already reached.
+	surgeCount := deviseExistingSurge(cpms, sortedIndexedMs)
 
-	for _, machines := range sortedIndexedMs {
+	updated := false
+
+	for idx, machines := range sortedIndexedMs {
 		needsReplacement := needReplacementMachines(machines)
 		// if no machines have been deleted or need update in this info list, continue with checking
 		if len(needsReplacement) == 0 {
 			continue
 		}
 
-		// if there is only 1 machine and it needs an update, log the need for the user to act
-		if len(needsReplacement) == 1 && needsReplacement[0].NeedsUpdate {
-			updates = true
-			logger = logger.WithValues("index", int(needsReplacement[0].Index), "namespace", r.Namespace, "name", needsReplacement[0].MachineRef.ObjectMeta.Name)
-			logger.V(2).Info(machineRequiresUpdate)
+		if done := r.waitForPendingMachines(logger, machines); done {
+			updated = true
+		}
+
+		// if there is only 1 machine and it needs an update
+		if len(machines) == 1 && machines[0].NeedsUpdate {
+			logger = logger.WithValues("index", int(machines[0].Index), "namespace", r.Namespace, "name", machines[0].MachineRef.ObjectMeta.Name)
+			if isDeletedMachine(machines[0]) {
+				// if deleted create the replacement
+				result, err := createMachine(ctx, logger, machineProvider, int32(idx), maxSurge, &surgeCount)
+				if err != nil {
+					return result, err
+				}
+			} else {
+				// if not deleted, tell the user to delete it
+				logger.V(2).Info(machineRequiresUpdate)
+			}
+			updated = true
 			continue
 		}
 	}
 
-	if !updates {
+	if !updated {
 		logger.V(4).Info(noUpdatesRequired)
 	}
 

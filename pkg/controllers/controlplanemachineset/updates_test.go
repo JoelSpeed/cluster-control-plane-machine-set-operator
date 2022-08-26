@@ -1057,7 +1057,7 @@ var _ = Describe("reconcileMachineUpdates", func() {
 					}
 				},
 			}),
-			PEntry("with updates required in a single index, and the machine has been deleted", onDeleteUpdateTableInput{
+			Entry("with updates required in a single index, and the machine has been deleted", onDeleteUpdateTableInput{
 				cpmsBuilder: cpmsBuilder.WithReplicas(3),
 				machineInfos: map[int32][]machineproviders.MachineInfo{
 					0: {updatedMachineBuilder.WithIndex(0).WithMachineName("machine-0").WithNodeName("node-0").Build()},
@@ -1065,7 +1065,7 @@ var _ = Describe("reconcileMachineUpdates", func() {
 					2: {updatedMachineBuilder.WithIndex(2).WithMachineName("machine-2").WithNodeName("node-2").Build()},
 				},
 				setupMock: func() {
-					mockMachineProvider.EXPECT().CreateMachine(gomock.Any(), gomock.Any(), int32(1)).Return(nil).Times(0)
+					mockMachineProvider.EXPECT().CreateMachine(gomock.Any(), gomock.Any(), int32(1)).Return(nil).Times(1)
 					mockMachineProvider.EXPECT().DeleteMachine(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 				},
 				expectedLogsBuilder: func() []test.LogEntry {
@@ -1082,7 +1082,7 @@ var _ = Describe("reconcileMachineUpdates", func() {
 					}
 				},
 			}),
-			PEntry("with updates required in a single index, and the machine has been deleted, and an error occurrs", onDeleteUpdateTableInput{
+			Entry("with updates required in a single index, and the machine has been deleted, and an error occurrs", onDeleteUpdateTableInput{
 				cpmsBuilder:          cpmsBuilder.WithReplicas(3),
 				expectedErrorBuilder: func() error { return fmt.Errorf("error creating new Machine for index %d: %w", 1, transientError) },
 				machineInfos: map[int32][]machineproviders.MachineInfo{
@@ -1091,7 +1091,7 @@ var _ = Describe("reconcileMachineUpdates", func() {
 					2: {updatedMachineBuilder.WithIndex(2).WithMachineName("machine-2").WithNodeName("node-2").Build()},
 				},
 				setupMock: func() {
-					mockMachineProvider.EXPECT().CreateMachine(gomock.Any(), gomock.Any(), int32(1)).Return(transientError).Times(0)
+					mockMachineProvider.EXPECT().CreateMachine(gomock.Any(), gomock.Any(), int32(1)).Return(transientError).Times(1)
 					mockMachineProvider.EXPECT().DeleteMachine(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 				},
 				expectedLogsBuilder: func() []test.LogEntry {
@@ -1108,7 +1108,7 @@ var _ = Describe("reconcileMachineUpdates", func() {
 					}
 				},
 			}),
-			PEntry("with updates required in a single index, and replacement machine is pending", onDeleteUpdateTableInput{
+			Entry("with updates required in a single index, and replacement machine is pending", onDeleteUpdateTableInput{
 				cpmsBuilder: cpmsBuilder.WithReplicas(3),
 				machineInfos: map[int32][]machineproviders.MachineInfo{
 					0: {updatedMachineBuilder.WithIndex(0).WithMachineName("machine-0").WithNodeName("node-0").Build()},
