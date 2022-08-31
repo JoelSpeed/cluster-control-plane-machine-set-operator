@@ -233,7 +233,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx co
 
 		// if there is only 1 machine and it needs an update
 		if len(machines) == 1 && machines[0].NeedsUpdate {
-			logger = logger.WithValues("index", int(machines[0].Index), "namespace", r.Namespace, "name", machines[0].MachineRef.ObjectMeta.Name)
+			logger := logger.WithValues("index", int(machines[0].Index), "namespace", r.Namespace, "name", machines[0].MachineRef.ObjectMeta.Name)
 			if isDeletedMachine(machines[0]) {
 				// if deleted create the replacement
 				result, err := createMachine(ctx, logger, machineProvider, int32(idx), maxSurge, &surgeCount)
@@ -260,9 +260,10 @@ func (r *ControlPlaneMachineSetReconciler) waitForPendingMachines(logger logr.Lo
 	machinesPending := pendingMachines(machines)
 	machinesNeedingReplacement := needReplacementMachines(machines)
 	machinesReady := readyMachines(machines)
+	machinesDeleting := deletingMachines(machines)
 
 	// Find out if and what Machines in this index need an update.
-	if isEmpty(machinesReady) && hasAny(machinesPending) {
+	if isEmpty(machinesReady) && hasAny(machinesPending) && isEmpty(machinesDeleting) {
 		// There are No Ready Machines for this index but a Pending Machine Replacement is present.
 		// Wait for it to become Ready.
 		// Consider the first found pending machine for this index to be the replacement machine.
@@ -283,6 +284,20 @@ func (r *ControlPlaneMachineSetReconciler) waitForPendingMachines(logger logr.Lo
 
 		logger := logger.WithValues("index", int(outdatedMachine.Index), "namespace", r.Namespace, "name", outdatedMachine.MachineRef.ObjectMeta.Name)
 		logger.V(2).WithValues("replacementName", replacementMachine.MachineRef.ObjectMeta.Name).Info(waitingForReplacement)
+
+		return true
+	}
+
+	if hasAny(machinesDeleting) && hasAny(machinesReady) {
+		fmt.Printf("machinesDeleting: %v\n", machinesDeleting)
+		fmt.Printf("machinesReady: %v\n", machinesReady)
+		// A replacement Machine exists, but the original has not been completely deleted yet.
+		// Wait for the deleted Machine to be removed.
+		// Consider the first found deleted machine for this index to be the deleting machine.
+		deletedMachine := machinesDeleting[0]
+
+		logger := logger.WithValues("index", int(deletedMachine.Index), "namespace", r.Namespace, "name", deletedMachine.MachineRef.ObjectMeta.Name)
+		logger.V(2).Info(waitingForRemoved)
 
 		return true
 	}
@@ -327,9 +342,6 @@ func (r *ControlPlaneMachineSetReconciler) deleteReplacedMachines(ctx context.Co
 		}
 
 		// The Outdated Machine has already been marked for deletion.
-		// Wait for its removal.
-		logger.V(2).Info(waitingForRemoved)
-
 		return true, ctrl.Result{}, nil
 	}
 
@@ -429,6 +441,19 @@ func needReplacementMachines(machinesInfo []machineproviders.MachineInfo) []mach
 	}
 
 	return needsReplacement
+}
+
+// deletingMachines returns the list of MachineInfo which have a Machine with a deletion timestamp.
+func deletingMachines(machinesInfo []machineproviders.MachineInfo) []machineproviders.MachineInfo {
+	result := []machineproviders.MachineInfo{}
+
+	for _, m := range machinesInfo {
+		if isDeletedMachine(m) {
+			result = append(result, m)
+		}
+	}
+
+	return result
 }
 
 // pendingMachines returns the list of MachineInfo which have a Pending Machine and are not pending deletion.
