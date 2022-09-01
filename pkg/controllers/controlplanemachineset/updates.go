@@ -207,17 +207,6 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx co
 	// are executed prioritizing the lower indexes first.
 	sortedIndexedMs := sortMachineInfosByIndex(indexedMachineInfos)
 
-	// The maximum number of machines that
-	// can be scheduled above the original number of desired machines.
-	// At present, the surge is limited to a single Machine instance.
-	// NOTE: If this gets changed or parametrized,
-	// the tests will need to be updated accordingly.
-	maxSurge := 1
-	// Devise the existing surge and keep track of the current surge count.
-	// No check for early stoppage is done here,
-	// as deletions can continue even if the maxSurge has been already reached.
-	surgeCount := deviseExistingSurge(cpms, sortedIndexedMs)
-
 	updated := false
 
 	for idx, machines := range sortedIndexedMs {
@@ -236,7 +225,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx co
 			logger := logger.WithValues("index", int(machines[0].Index), "namespace", r.Namespace, "name", machines[0].MachineRef.ObjectMeta.Name)
 			if isDeletedMachine(machines[0]) {
 				// if deleted create the replacement
-				result, err := createMachine(ctx, logger, machineProvider, int32(idx), maxSurge, &surgeCount)
+				result, err := createMachine(ctx, logger, machineProvider, int32(idx))
 				if err != nil {
 					return result, err
 				}
@@ -289,8 +278,6 @@ func (r *ControlPlaneMachineSetReconciler) waitForPendingMachines(logger logr.Lo
 	}
 
 	if hasAny(machinesDeleting) && hasAny(machinesReady) {
-		fmt.Printf("machinesDeleting: %v\n", machinesDeleting)
-		fmt.Printf("machinesReady: %v\n", machinesReady)
 		// A replacement Machine exists, but the original has not been completely deleted yet.
 		// Wait for the deleted Machine to be removed.
 		// Consider the first found deleted machine for this index to be the deleting machine.
@@ -358,7 +345,7 @@ func (r *ControlPlaneMachineSetReconciler) createReplacementMachines(ctx context
 		// Trigger a Machine creation.
 		logger := logger.WithValues("index", idx, "namespace", r.Namespace, "name", "<Unknown>")
 
-		result, err := createMachine(ctx, logger, machineProvider, int32(idx), maxSurge, surgeCount)
+		result, err := createMachineWithSurge(ctx, logger, machineProvider, int32(idx), maxSurge, surgeCount)
 		if err != nil {
 			return false, result, err
 		}
@@ -374,7 +361,7 @@ func (r *ControlPlaneMachineSetReconciler) createReplacementMachines(ctx context
 		outdatedMachine := machinesNeedingReplacement[0]
 		logger := logger.WithValues("index", int(outdatedMachine.Index), "namespace", r.Namespace, "name", outdatedMachine.MachineRef.ObjectMeta.Name)
 
-		result, err := createMachine(ctx, logger, machineProvider, outdatedMachine.Index, maxSurge, surgeCount)
+		result, err := createMachineWithSurge(ctx, logger, machineProvider, outdatedMachine.Index, maxSurge, surgeCount)
 		if err != nil {
 			return false, result, err
 		}
@@ -400,7 +387,22 @@ func deleteMachine(ctx context.Context, logger logr.Logger, machineProvider mach
 }
 
 // createMachine creates the Machine provided.
-func createMachine(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, idx int32, maxSurge int, surgeCount *int) (ctrl.Result, error) {
+func createMachine(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, idx int32) (ctrl.Result, error) {
+	if err := machineProvider.CreateMachine(ctx, logger, idx); err != nil {
+		werr := fmt.Errorf("error creating new Machine for index %d: %w", idx, err)
+		logger.Error(werr, errorCreatingMachine)
+
+		return ctrl.Result{}, werr
+	}
+	logger.V(2).Info(createdReplacement)
+
+	return ctrl.Result{}, nil
+}
+
+// createMachine creates the Machine provided while observing the surge count.
+// This function will not create machines if the current surgeCount is greater
+// than the maxSurge. If it does create a machine, it will increase the surgeCount.
+func createMachineWithSurge(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, idx int32, maxSurge int, surgeCount *int) (ctrl.Result, error) {
 	// Check if a surge in Machines is allowed.
 	if *surgeCount >= maxSurge {
 		// No more room to surge
@@ -411,17 +413,13 @@ func createMachine(ctx context.Context, logger logr.Logger, machineProvider mach
 
 	// There is still room to surge,
 	// trigger a Replacement Machine creation.
-	if err := machineProvider.CreateMachine(ctx, logger, idx); err != nil {
-		werr := fmt.Errorf("error creating new Machine for index %d: %w", idx, err)
-		logger.Error(werr, errorCreatingMachine)
+	if result, err := createMachine(ctx, logger, machineProvider, idx); err != nil {
+		return result, err
+	} else {
+		*surgeCount++
 
-		return ctrl.Result{}, werr
+		return result, nil
 	}
-
-	logger.V(2).Info(createdReplacement)
-	*surgeCount++
-
-	return ctrl.Result{}, nil
 }
 
 // isDeletedMachine checks if a machine is deleted.
