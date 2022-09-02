@@ -1515,7 +1515,7 @@ var _ = Describe("reconcileMachineUpdates", func() {
 					}
 				},
 			}),
-			PEntry("with a pending machine in an index", onDeleteUpdateTableInput{
+			Entry("with a pending machine in an index", onDeleteUpdateTableInput{
 				cpmsBuilder: cpmsBuilder.WithReplicas(3),
 				machineInfos: map[int32][]machineproviders.MachineInfo{
 					0: {updatedMachineBuilder.WithIndex(0).WithMachineName("machine-0").WithNodeName("node-0").Build()},
@@ -1540,7 +1540,7 @@ var _ = Describe("reconcileMachineUpdates", func() {
 					}
 				},
 			}),
-			PEntry("with a missing index, and other indexes need updating", onDeleteUpdateTableInput{
+			Entry("with a missing index, and other indexes need updating", onDeleteUpdateTableInput{
 				cpmsBuilder: cpmsBuilder.WithReplicas(3),
 				machineInfos: map[int32][]machineproviders.MachineInfo{
 					0: {updatedMachineBuilder.WithIndex(0).WithMachineName("machine-0").WithNodeName("node-0").Build()},
@@ -1575,7 +1575,7 @@ var _ = Describe("reconcileMachineUpdates", func() {
 					}
 				},
 			}),
-			PEntry("with a pending machine in an index, and other indexes need updating", onDeleteUpdateTableInput{
+			Entry("with a pending machine in an index, and other indexes need updating", onDeleteUpdateTableInput{
 				cpmsBuilder: cpmsBuilder.WithReplicas(3),
 				machineInfos: map[int32][]machineproviders.MachineInfo{
 					0: {updatedMachineBuilder.WithIndex(0).WithMachineName("machine-0").WithNodeName("node-0").Build()},

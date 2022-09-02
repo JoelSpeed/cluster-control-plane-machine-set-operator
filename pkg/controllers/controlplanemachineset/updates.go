@@ -216,8 +216,9 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx co
 
 	for idx, machines := range sortedIndexedMs {
 		needsReplacement := needReplacementMachines(machines)
-		// if no machines have been deleted or need update in this info list, continue with checking
-		if len(needsReplacement) == 0 && hasAny(machines) {
+		machinesPending := pendingMachines(machines)
+		// if no machines need replacement or are pending, we can continue processing the next MachineInfo
+		if isEmpty(needsReplacement) && hasAny(machines) && isEmpty(machinesPending) {
 			continue
 		}
 
@@ -415,7 +416,7 @@ func createMachine(ctx context.Context, logger logr.Logger, machineProvider mach
 	return ctrl.Result{}, nil
 }
 
-// createMachine creates the Machine provided while observing the surge count.
+// createMachineWithSurge creates the Machine provided while observing the surge count.
 // This function will not create machines if the current surgeCount is greater
 // than the maxSurge. If it does create a machine, it will increase the surgeCount.
 func createMachineWithSurge(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, idx int32, maxSurge int, surgeCount *int) (ctrl.Result, error) {
