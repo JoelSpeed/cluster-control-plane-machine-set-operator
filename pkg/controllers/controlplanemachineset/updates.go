@@ -78,6 +78,11 @@ const (
 	// place because the rollout is waiting for a replacement Machine to become ready.
 	// This is used when replacing a Machine within an index.
 	waitingForReplacement = "Waiting for replacement machine to become ready"
+
+	// unknownMachineName is a value used for logging new machines when we do not know the name
+	// of the upcoming machine. This can occur when all machines have been removed from an index
+	// and a new one will be created.
+	unknownMachineName = "<Unknown>"
 )
 
 var (
@@ -212,12 +217,23 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx co
 	for idx, machines := range sortedIndexedMs {
 		needsReplacement := needReplacementMachines(machines)
 		// if no machines have been deleted or need update in this info list, continue with checking
-		if len(needsReplacement) == 0 {
+		if len(needsReplacement) == 0 && hasAny(machines) {
 			continue
 		}
 
 		if done := r.waitForPendingMachines(logger, machines); done {
 			updated = true
+		}
+
+		// if there are no machines, create one
+		if isEmpty(machines) {
+			logger := logger.WithValues("index", int(idx), "namespace", r.Namespace, "name", unknownMachineName)
+			result, err := createMachine(ctx, logger, machineProvider, int32(idx))
+			if err != nil {
+				return result, err
+			}
+			updated = true
+			continue
 		}
 
 		// if there is only 1 machine and it needs an update
@@ -343,7 +359,7 @@ func (r *ControlPlaneMachineSetReconciler) createReplacementMachines(ctx context
 	if isEmpty(machines) {
 		// No Machines exist for this index.
 		// Trigger a Machine creation.
-		logger := logger.WithValues("index", idx, "namespace", r.Namespace, "name", "<Unknown>")
+		logger := logger.WithValues("index", idx, "namespace", r.Namespace, "name", unknownMachineName)
 
 		result, err := createMachineWithSurge(ctx, logger, machineProvider, int32(idx), maxSurge, surgeCount)
 		if err != nil {
