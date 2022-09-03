@@ -180,7 +180,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineRollingUpdate(ctx con
 			updated = true
 		}
 
-		if done, result, err := r.createReplacementMachines(ctx, logger, machineProvider, machines, idx, maxSurge, &surgeCount); err != nil {
+		if done, result, err := r.createRollingUpdateReplacementMachines(ctx, logger, machineProvider, machines, idx, maxSurge, &surgeCount); err != nil {
 			return result, err
 		} else if done {
 			updated = true
@@ -217,6 +217,7 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx co
 	for idx, machines := range sortedIndexedMs {
 		needsReplacement := needReplacementMachines(machines)
 		machinesPending := pendingMachines(machines)
+
 		// if no machines need replacement or are pending, we can continue processing the next MachineInfo
 		if isEmpty(needsReplacement) && hasAny(machines) && isEmpty(machinesPending) {
 			continue
@@ -226,32 +227,10 @@ func (r *ControlPlaneMachineSetReconciler) reconcileMachineOnDeleteUpdate(ctx co
 			updated = true
 		}
 
-		// if there are no machines, create one
-		if isEmpty(machines) {
-			logger := logger.WithValues("index", int(idx), "namespace", r.Namespace, "name", unknownMachineName)
-			result, err := createMachine(ctx, logger, machineProvider, int32(idx))
-			if err != nil {
-				return result, err
-			}
+		if done, result, err := r.createOnDeleteReplacementMachines(ctx, logger, machineProvider, machines, idx); err != nil {
+			return result, err
+		} else if done {
 			updated = true
-			continue
-		}
-
-		// if there is only 1 machine and it needs an update
-		if len(machines) == 1 && machines[0].NeedsUpdate {
-			logger := logger.WithValues("index", int(machines[0].Index), "namespace", r.Namespace, "name", machines[0].MachineRef.ObjectMeta.Name)
-			if isDeletedMachine(machines[0]) {
-				// if deleted create the replacement
-				result, err := createMachine(ctx, logger, machineProvider, int32(idx))
-				if err != nil {
-					return result, err
-				}
-			} else {
-				// if not deleted, tell the user to delete it
-				logger.V(2).Info(machineRequiresUpdate)
-			}
-			updated = true
-			continue
 		}
 	}
 
@@ -352,7 +331,43 @@ func (r *ControlPlaneMachineSetReconciler) deleteReplacedMachines(ctx context.Co
 	return false, ctrl.Result{}, nil
 }
 
-func (r *ControlPlaneMachineSetReconciler) createReplacementMachines(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, machines []machineproviders.MachineInfo, idx int, maxSurge int, surgeCount *int) (bool, ctrl.Result, error) {
+func (r *ControlPlaneMachineSetReconciler) createOnDeleteReplacementMachines(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, machines []machineproviders.MachineInfo, idx int) (bool, ctrl.Result, error) {
+	if isEmpty(machines) {
+		// No Machines exist for this index.
+		// Trigger a Machine creation.
+		logger := logger.WithValues("index", idx, "namespace", r.Namespace, "name", unknownMachineName)
+
+		result, err := createMachine(ctx, logger, machineProvider, int32(idx))
+		if err != nil {
+			return false, result, err
+		}
+
+		return true, result, nil
+	}
+
+	if len(machines) == 1 && machines[0].NeedsUpdate {
+		// if there is only 1 machine and it needs an update
+		logger := logger.WithValues("index", int(machines[0].Index), "namespace", r.Namespace, "name", machines[0].MachineRef.ObjectMeta.Name)
+
+		if isDeletedMachine(machines[0]) {
+			// if deleted create the replacement
+			result, err := createMachine(ctx, logger, machineProvider, int32(idx))
+			if err != nil {
+				return false, result, err
+			}
+
+			return true, result, nil
+		} else {
+			// if not deleted, tell the user to delete it
+			logger.V(2).Info(machineRequiresUpdate)
+			return true, ctrl.Result{}, nil
+		}
+	}
+
+	return false, ctrl.Result{}, nil
+}
+
+func (r *ControlPlaneMachineSetReconciler) createRollingUpdateReplacementMachines(ctx context.Context, logger logr.Logger, machineProvider machineproviders.MachineProvider, machines []machineproviders.MachineInfo, idx int, maxSurge int, surgeCount *int) (bool, ctrl.Result, error) {
 	machinesNeedingReplacement := needReplacementMachines(machines)
 	machinesPending := pendingMachines(machines)
 	machinesUpdatedNonDeleted := updatedNonDeletedMachines(machines)
@@ -411,6 +426,7 @@ func createMachine(ctx context.Context, logger logr.Logger, machineProvider mach
 
 		return ctrl.Result{}, werr
 	}
+
 	logger.V(2).Info(createdReplacement)
 
 	return ctrl.Result{}, nil
