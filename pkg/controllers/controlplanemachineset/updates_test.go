@@ -1610,6 +1610,32 @@ var _ = Describe("reconcileMachineUpdates", func() {
 					}
 				},
 			}),
+			Entry("with no updates required, but a Machine has been deleted", onDeleteUpdateTableInput{
+				cpmsBuilder: cpmsBuilder.WithReplicas(3),
+				machineInfos: map[int32][]machineproviders.MachineInfo{
+					0: {updatedMachineBuilder.WithIndex(0).WithMachineName("machine-0").WithNodeName("node-0").Build()},
+					1: {updatedMachineBuilder.WithIndex(1).WithMachineName("machine-1").WithNodeName("node-1").Build()},
+					2: {updatedMachineBuilder.WithIndex(2).WithMachineName("machine-2").WithNodeName("node-2").WithMachineDeletionTimestamp(metav1.Now()).WithReady(false).Build()},
+				},
+				setupMock: func() {
+					mockMachineProvider.EXPECT().CreateMachine(gomock.Any(), gomock.Any(), int32(2)).Times(1)
+					mockMachineProvider.EXPECT().DeleteMachine(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+				},
+				expectedLogsBuilder: func() []test.LogEntry {
+					return []test.LogEntry{
+						{
+							Level: 2,
+							KeysAndValues: []interface{}{
+								"updateStrategy", machinev1.OnDelete,
+								"index", 2,
+								"namespace", namespaceName,
+								"name", "machine-2",
+							},
+							Message: createdReplacement,
+						},
+					}
+				},
+			}),
 		)
 	})
 

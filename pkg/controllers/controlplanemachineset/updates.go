@@ -345,7 +345,9 @@ func (r *ControlPlaneMachineSetReconciler) createOnDeleteReplacementMachines(ctx
 		return true, result, nil
 	}
 
-	if len(machines) == 1 && machines[0].NeedsUpdate {
+	machinesNeedingReplacement := needReplacementMachines(machines)
+
+	if len(machines) == 1 && len(machinesNeedingReplacement) == 1 {
 		// if there is only 1 machine and it needs an update
 		logger := logger.WithValues("index", int(machines[0].Index), "namespace", r.Namespace, "name", machines[0].MachineRef.ObjectMeta.Name)
 
