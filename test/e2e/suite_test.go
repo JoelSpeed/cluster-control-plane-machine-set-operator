@@ -55,3 +55,5 @@ var _ = BeforeSuite(func() {
 	SetDefaultConsistentlyDuration(framework.DefaultTimeout)
 	SetDefaultConsistentlyPollingInterval(framework.DefaultInterval)
 })
+
+var _ = ReportAfterSuite("Flake Reporter", framework.InformingReporter)
